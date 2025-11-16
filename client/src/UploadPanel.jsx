@@ -10,7 +10,7 @@ export default function UploadPanel() {
   const [edgesUrl, setEdgesUrl] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const API = process.env.REACT_APP_API_URL || "http://127.0.0.1:5000";
+  const API = "https://mapping-analyzing-participation.onrender.com/" || "http://127.0.0.1:5000";
   const ALLOWED = [".csv", ".xlsx", ".xls"];
 
   const hasAllowedExt = (name = "") =>
