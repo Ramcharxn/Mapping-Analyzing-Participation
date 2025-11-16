@@ -1,0 +1,8 @@
+backup/
+backupv2/
+outputs/
+uploads/
+__pycache__/
+.env
+node_modules/
+client/build/
