@@ -20,10 +20,10 @@ from converter import *
 # Basic setup
 # -------------------------------------------------------------------
 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017")
 ALLOWED_EXT = {".csv", ".xlsx"}
 
-app = Flask(__name__, static_folder="/client/build", static_url_path="/")
+app = Flask(__name__, static_folder="client/build", static_url_path="/")
 CORS(app, supports_credentials=True)
 
 # MongoDB
@@ -425,8 +425,8 @@ def upload():
 
         return jsonify({
             "message": msg,
-            "nodes_url": f"http://127.0.0.1:5000/download/{nodes_file}",
-            "edges_url": f"http://127.0.0.1:5000/download/{edges_file}",
+            "nodes_url": f"https://mapping-analyzing-participation.onrender.com/{nodes_file}",
+            "edges_url": f"https://mapping-analyzing-participation.onrender.com/{edges_file}",
         }), 200
 
     except Exception as e:
