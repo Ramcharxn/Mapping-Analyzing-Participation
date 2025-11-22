@@ -388,7 +388,7 @@ def api_export_responses(form_id):
 
 @app.route("/")
 def index():
-    return jsonify({"status": "running", "message": "Form backend is alive."})
+    return jsonify({"status": "running", "message": "Form backend is alive. Running v2"})
 
 
 
