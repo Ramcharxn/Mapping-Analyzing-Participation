@@ -1,7 +1,8 @@
 // src/DynamicForm.js
-import React, { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import React, { useEffect, useMemo, useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { getForm, submitForm } from "./api";
+import { Country, State, City } from "country-state-city";
 
 const SECTOR_OPTIONS = [
   "Education",
@@ -23,13 +24,26 @@ const CONNECTION_TYPES = [
 
 function DynamicForm() {
   const { id } = useParams();
+  const navigate = useNavigate();
+
   const [schema, setSchema] = useState(null);
   const [values, setValues] = useState({});
-  const [connections, setConnections] = useState([]); // start with NO rows
+  const [connections, setConnections] = useState([]);
   const [status, setStatus] = useState("");
   const [statusType, setStatusType] = useState("info");
-  const [errors, setErrors] = useState({}); // field-level + section errors
+  const [errors, setErrors] = useState({});
 
+  // Location-related state
+  const [countryIso, setCountryIso] = useState("");
+  const [stateIso, setStateIso] = useState("");
+
+  // Names of location fields in the schema (so we can write into values[])
+  const [countryFieldName, setCountryFieldName] = useState(null);
+  const [stateFieldName, setStateFieldName] = useState(null);
+  const [cityFieldName, setCityFieldName] = useState(null);
+  const [addressFieldName, setAddressFieldName] = useState(null);
+
+  // Load schema
   useEffect(() => {
     getForm(id)
       .then((f) => {
@@ -39,33 +53,76 @@ function DynamicForm() {
           ...(f.baseRequired || []),
           ...(f.baseOptional || []),
           ...(f.extraFields || []),
-        ].filter((field) => field.name !== "connections"); // special-handled
+        ].filter((field) => field.name !== "connections");
 
-        const init = {};
+        const initValues = {};
         allFields.forEach((field) => {
-          init[field.name] = "";
+          initValues[field.name] = "";
         });
 
-        if (f.eventId) init.eventId = f.eventId;
-        if (f.eventName) init.eventName = f.eventName;
-        if (f.eventDate) init.eventDate = f.eventDate;
+        if (f.eventId) initValues.eventId = f.eventId;
+        if (f.eventName) initValues.eventName = f.eventName;
+        if (f.eventDate) initValues.eventDate = f.eventDate;
 
-        setValues(init);
+        setValues(initValues);
+
+        // Detect which field names correspond to country, state, city, address
+        const fixedFields = (f.baseRequired || []).filter(
+          (fld) => fld.name !== "connections"
+        );
+
+        const findFieldName = (predicate) => {
+          const field = fixedFields.find(predicate);
+          return field ? field.name : null;
+        };
+
+        setCountryFieldName(
+          findFieldName(
+            (fld) =>
+              /country/i.test(fld.name) || /country/i.test(fld.label || "")
+          )
+        );
+        setStateFieldName(
+          findFieldName(
+            (fld) =>
+              /state/i.test(fld.name) || /state/i.test(fld.label || "")
+          )
+        );
+        setCityFieldName(
+          findFieldName(
+            (fld) => /city/i.test(fld.name) || /city/i.test(fld.label || "")
+          )
+        );
+        setAddressFieldName(
+          findFieldName(
+            (fld) =>
+              /address/i.test(fld.name) || /address/i.test(fld.label || "")
+          )
+        );
       })
       .catch(() => {
-        setStatus("Form not found");
+        setStatus("Form not found.");
         setStatusType("danger");
       });
   }, [id]);
 
+  const allCountries = useMemo(() => Country.getAllCountries(), []);
+
+  const availableStates = useMemo(() => {
+    if (!countryIso) return [];
+    return State.getStatesOfCountry(countryIso) || [];
+  }, [countryIso]);
+
+  const availableCities = useMemo(() => {
+    if (!countryIso || !stateIso) return [];
+    return City.getCitiesOfState(countryIso, stateIso) || [];
+  }, [countryIso, stateIso]);
+
   if (!schema) {
     return (
-      <div
-        className="d-flex justify-content-center align-items-center"
-        style={{ minHeight: "40vh" }}
-      >
+      <div className="form-page bg-light d-flex justify-content-center align-items-center min-vh-100">
         {status ? (
-          <div className={`alert alert-${statusType}`}>{status}</div>
+          <div className={`alert alert-${statusType} mb-0`}>{status}</div>
         ) : (
           <div className="spinner-border" role="status">
             <span className="visually-hidden">Loading form...</span>
@@ -103,6 +160,46 @@ function DynamicForm() {
     setConnections((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const getCountryName = (iso) => {
+    const c = allCountries.find((c) => c.isoCode === iso);
+    return c ? c.name : "";
+  };
+
+  const getStateName = (iso) => {
+    const s = availableStates.find((s) => s.isoCode === iso);
+    return s ? s.name : "";
+  };
+
+  const handleCountrySelect = (iso) => {
+    setCountryIso(iso);
+    setStateIso("");
+    setValues((prev) => {
+      const next = { ...prev };
+      if (countryFieldName) next[countryFieldName] = iso ? getCountryName(iso) : "";
+      if (stateFieldName) next[stateFieldName] = "";
+      if (cityFieldName) next[cityFieldName] = "";
+      return next;
+    });
+  };
+
+  const handleStateSelect = (iso) => {
+    setStateIso(iso);
+    setValues((prev) => {
+      const next = { ...prev };
+      if (stateFieldName) next[stateFieldName] = iso ? getStateName(iso) : "";
+      if (cityFieldName) next[cityFieldName] = "";
+      return next;
+    });
+  };
+
+  const handleCitySelect = (cityName) => {
+    setValues((prev) => {
+      const next = { ...prev };
+      if (cityFieldName) next[cityFieldName] = cityName;
+      return next;
+    });
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setStatus("");
@@ -110,50 +207,50 @@ function DynamicForm() {
 
     const newErrors = {};
 
-    // ---------- 1. EMAIL & PHONE ----------
-    const rawEmail = (values.email || "").trim();
-    const rawPhone = (values.phone || "").trim();
-
-    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!rawEmail) {
-      newErrors.email = "Email is required.";
-    } else if (!emailPattern.test(rawEmail)) {
-      newErrors.email =
-        "Please enter a valid email address (for example: NAME@EXAMPLE.COM).";
+    // Email / phone validation if those fields exist
+    if ("email" in values) {
+      const rawEmail = (values.email || "").trim();
+      const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!rawEmail) {
+        newErrors.email = "Email is required.";
+      } else if (!emailPattern.test(rawEmail)) {
+        newErrors.email =
+          "Please enter a valid email address (for example: NAME@EXAMPLE.COM).";
+      }
     }
 
-    const phoneDigits = rawPhone.replace(/\D/g, "");
-    if (!rawPhone) {
-      newErrors.phone = "Phone number is required.";
-    } else if (phoneDigits.length < 7 || phoneDigits.length > 15) {
-      newErrors.phone =
-        "Phone number must be 7–15 digits (numbers only, no spaces or symbols).";
+    if ("phone" in values) {
+      const rawPhone = (values.phone || "").trim();
+      const phoneDigits = rawPhone.replace(/\D/g, "");
+      if (!rawPhone) {
+        newErrors.phone = "Phone number is required.";
+      } else if (phoneDigits.length < 7 || phoneDigits.length > 15) {
+        newErrors.phone =
+          "Phone number must be 7–15 digits (numbers only, no spaces or symbols).";
+      }
     }
 
-    // ---------- 2. SECTOR ----------
-    const sectorVal = (values.sector || "").trim();
-    if (!sectorVal) {
-      newErrors.sector = "Sector is required.";
+    // Sector required if present
+    if ("sector" in values) {
+      const sectorVal = (values.sector || "").trim();
+      if (!sectorVal) {
+        newErrors.sector = "Sector is required.";
+      }
     }
 
-    // ---------- 3. OTHER REQUIRED BASE FIELDS ----------
+    // Other required base fields
     baseRequired.forEach((field) => {
       if (!field.required) return;
-
-      // skip ones already checked or special
-      if (
-        ["email", "phone", "sector", "connections"].includes(field.name)
-      ) {
+      if (["email", "phone", "sector", "connections"].includes(field.name)) {
         return;
       }
-
       const val = (values[field.name] || "").trim();
       if (!val) {
         newErrors[field.name] = `${field.label} is required.`;
       }
     });
 
-    // ---------- 4. REQUIRED EXTRA FIELDS ----------
+    // Required extra fields
     extraFields.forEach((field) => {
       if (!field.required) return;
       const val = (values[field.name] || "").trim();
@@ -162,29 +259,22 @@ function DynamicForm() {
       }
     });
 
-    // ---------- 5. CONNECTIONS (OPTIONAL) ----------
-    // Rule: user may leave all connections blank.
-    // But if they start filling a row (any of the three fields),
-    // that row must have BOTH connectionOrg and connectionType.
-    let hasHalfFilledConnection = false;
-
+    // Connection validation
+    let hasHalfFilled = false;
     connections.forEach((c) => {
       const org = (c.connectionOrg || "").trim();
-      const typ = (c.connectionType || "").trim();
+      const type = (c.connectionType || "").trim();
       const other = (c.otherText || "").trim();
-
-      const anyFilled = org || typ || other;
-      if (anyFilled && (!org || !typ)) {
-        hasHalfFilledConnection = true;
+      const anyFilled = org || type || other;
+      if (anyFilled && (!org || !type)) {
+        hasHalfFilled = true;
       }
     });
-
-    if (hasHalfFilledConnection) {
+    if (hasHalfFilled) {
       newErrors.connections =
         "For each connection you add, please fill BOTH Connection Organization and Connection Type.";
     }
 
-    // ---------- 6. IF ERRORS, SHOW SUMMARY + FIELD MESSAGES ----------
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
       setStatus(
@@ -194,7 +284,7 @@ function DynamicForm() {
       return;
     }
 
-    // ---------- 7. NORMALIZE DATA (trim + UPPERCASE) ----------
+    // Build payload, uppercasing strings
     const cleanedValues = {};
     Object.entries(values).forEach(([key, val]) => {
       if (typeof val === "string") {
@@ -204,17 +294,15 @@ function DynamicForm() {
       }
     });
 
-    cleanedValues.email = rawEmail.toUpperCase();
-    cleanedValues.phone = phoneDigits.toUpperCase();
+    if (cleanedValues.phone) {
+      cleanedValues.phone = cleanedValues.phone.replace(/\D/g, "");
+    }
 
     const cleanedConnections = connections.map((conn) => {
       const out = {};
       Object.entries(conn).forEach(([k, v]) => {
-        if (typeof v === "string") {
-          out[k] = v.trim().toUpperCase();
-        } else {
-          out[k] = v;
-        }
+        if (typeof v === "string") out[k] = v.trim().toUpperCase();
+        else out[k] = v;
       });
       return out;
     });
@@ -231,20 +319,7 @@ function DynamicForm() {
 
     try {
       await submitForm(schema.id, payload);
-      setStatus("Submitted successfully! Thank you.");
-      setStatusType("success");
-
-      // reset fields (keep event meta)
-      const cleared = {};
-      fixedFields.forEach((f) => (cleared[f.name] = ""));
-      extraFields.forEach((f) => (cleared[f.name] = ""));
-      cleared.eventId = schema.eventId;
-      cleared.eventName = schema.eventName;
-      cleared.eventDate = schema.eventDate;
-
-      setValues(cleared);
-      setConnections([]);
-      setErrors({});
+      navigate("/thank-you");
     } catch (err) {
       setStatus("Submit failed. Please try again or check required fields.");
       setStatusType("danger");
@@ -253,249 +328,454 @@ function DynamicForm() {
 
   const errorMessages = Object.values(errors);
 
+  // Split fixedFields into "other" and location ones so we can control order
+  const isCountryField = (f) => countryFieldName && f.name === countryFieldName;
+  const isStateField = (f) => stateFieldName && f.name === stateFieldName;
+  const isCityField = (f) => cityFieldName && f.name === cityFieldName;
+  const isAddressField = (f) =>
+    addressFieldName && f.name === addressFieldName;
+
+  const otherFixedFields = fixedFields.filter(
+    (f) =>
+      ![countryFieldName, stateFieldName, cityFieldName, addressFieldName].includes(
+        f.name
+      )
+  );
+
+  const countryField = fixedFields.find(isCountryField);
+  const stateField = fixedFields.find(isStateField);
+  const cityField = fixedFields.find(isCityField);
+  const addressField = fixedFields.find(isAddressField);
+
   return (
-    <div className="row justify-content-center">
-      <div className="col-lg-8 col-md-10">
-        <div className="card shadow-sm mb-3">
-          <div className="card-body">
-            <h3 className="card-title mb-3">
-              {schema.title || "Participant & Connections Form"}
-            </h3>
-
-            <p className="text-muted small">
-              Fields marked with <span className="text-danger">*</span> are required.
-            </p>
-
-            {/* Global banner for success / backend / validation hint */}
-            {status && (
-              <div className={`alert alert-${statusType} py-2`}>{status}</div>
-            )}
-
-            {/* Validation summary – list all messages */}
-            {errorMessages.length > 0 && (
-              <div className="alert alert-danger py-2">
-                <strong>Please fix the following:</strong>
-                <ul className="mb-0">
-                  {errorMessages.map((msg, idx) => (
-                    <li key={idx}>{msg}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            <form onSubmit={handleSubmit}>
-              {/* Participant & organization */}
-              <h5 className="mt-2 mb-2">
-                Participant &amp; Organization Information
-              </h5>
-
-              {fixedFields.map((field) => {
-                if (field.name === "sector") {
-                  const invalid = !!errors.sector;
-                  return (
-                    <div className="mb-3" key={field.name}>
-                      <label className="form-label">
-                        Sector <span className="text-danger">*</span>
-                      </label>
-                      <select
-                        className={`form-select ${
-                          invalid ? "is-invalid" : ""
-                        }`}
-                        value={values.sector || ""}
-                        onChange={(e) =>
-                          handleChange("sector", e.target.value)
-                        }
-                      >
-                        <option value="">Select sector</option>
-                        {SECTOR_OPTIONS.map((opt) => (
-                          <option key={opt} value={opt}>
-                            {opt}
-                          </option>
-                        ))}
-                      </select>
-                      {invalid && (
-                        <div className="invalid-feedback">{errors.sector}</div>
-                      )}
-                    </div>
-                  );
-                }
-
-                const isInvalid = !!errors[field.name];
-
-                return (
-                  <div className="mb-3" key={field.name}>
-                    <label className="form-label">
-                      {field.label}{" "}
-                      {field.required && (
-                        <span className="text-danger">*</span>
-                      )}
-                    </label>
-                    <input
-                      type={field.type || "text"}
-                      className={`form-control ${
-                        isInvalid ? "is-invalid" : ""
-                      }`}
-                      value={values[field.name] || ""}
-                      onChange={(e) =>
-                        handleChange(field.name, e.target.value)
-                      }
-                    />
-                    {isInvalid && (
-                      <div className="invalid-feedback">
-                        {errors[field.name]}
-                      </div>
+    <div className="form-page bg-light min-vh-100 py-5">
+      <div className="container">
+        <div className="row justify-content-center">
+          <div className="col-xl-7 col-lg-8 col-md-10">
+            <div className="card shadow-lg border-0 rounded-4">
+              <div className="card-body p-4 p-md-5">
+                {/* Header */}
+                <div className="d-flex justify-content-between align-items-start mb-3">
+                  <div>
+                    <h2 className="mb-1">
+                      {schema.title || "Participant & Connections Form"}
+                    </h2>
+                    {schema.eventName && (
+                      <p className="text-muted mb-0">
+                        For event: <strong>{schema.eventName}</strong>
+                      </p>
                     )}
                   </div>
-                );
-              })}
-
-              {/* Connections */}
-              <hr className="my-4" />
-              <h5 className="mb-2">Connections (optional, up to 5)</h5>
-              <p className="text-muted small">
-                You can record up to five organization connections. Leave this
-                section empty if you don&apos;t want to add any connections. If
-                you start a connection row, please fill both the organization
-                name and connection type.
-              </p>
-
-              {errors.connections && (
-                <p className="text-danger small mb-2">{errors.connections}</p>
-              )}
-
-              {connections.length === 0 && (
-                <p className="text-muted small fst-italic">
-                  No connections added yet. Click{" "}
-                  <strong>“Add connection”</strong> to add one.
-                </p>
-              )}
-
-              {connections.map((conn, idx) => (
-                <div
-                  className="border rounded-3 p-3 mb-3"
-                  key={idx}
-                  style={{ backgroundColor: "#fafafa" }}
-                >
-                  <div className="d-flex justify-content-between align-items-center mb-3">
-                    <h6 className="mb-0">Connection {idx + 1}</h6>
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-outline-danger"
-                      onClick={() => removeConnection(idx)}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                  <div className="row g-3">
-                    <div className="col-md-6">
-                      <label className="form-label">
-                        Connection Organization
-                      </label>
-                      <input
-                        className="form-control"
-                        value={conn.connectionOrg}
-                        onChange={(e) =>
-                          handleConnectionChange(
-                            idx,
-                            "connectionOrg",
-                            e.target.value
-                          )
-                        }
-                      />
+                  {(schema.eventDate || schema.eventId) && (
+                    <div className="text-end">
+                      {schema.eventDate && (
+                        <div className="badge bg-light text-dark mb-1">
+                          {schema.eventDate}
+                        </div>
+                      )}
+                      {schema.eventId && (
+                        <div className="text-muted small">
+                          ID: {schema.eventId}
+                        </div>
+                      )}
                     </div>
-                    <div className="col-md-6">
-                      <label className="form-label">Connection Type</label>
-                      <select
-                        className="form-select"
-                        value={conn.connectionType}
-                        onChange={(e) =>
-                          handleConnectionChange(
-                            idx,
-                            "connectionType",
-                            e.target.value
-                          )
-                        }
-                      >
-                        <option value="">Select connection type</option>
-                        {CONNECTION_TYPES.map((opt) => (
-                          <option key={opt} value={opt}>
-                            {opt}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    {conn.connectionType === "Other" && (
-                      <div className="col-12">
-                        <label className="form-label">
-                          Please describe the connection
-                        </label>
-                        <input
-                          className="form-control"
-                          value={conn.otherText}
-                          onChange={(e) =>
-                            handleConnectionChange(
-                              idx,
-                              "otherText",
-                              e.target.value
-                            )
-                          }
-                        />
-                      </div>
-                    )}
-                  </div>
+                  )}
                 </div>
-              ))}
 
-              {connections.length < 5 && (
-                <button
-                  type="button"
-                  className="btn btn-outline-secondary mb-3"
-                  onClick={addConnection}
-                >
-                  + Add connection
-                </button>
-              )}
+                <p className="text-muted small mb-3">
+                  Fields marked with{" "}
+                  <span className="text-danger fw-bold">*</span> are required.
+                </p>
 
-              {/* Extra admin-defined fields */}
-              {extraFields.length > 0 && (
-                <>
-                  <hr className="my-4" />
-                  <h5 className="mb-2">Additional Questions</h5>
-                  {extraFields.map((field) => {
-                    const invalid = !!errors[field.name];
-                    return (
-                      <div className="mb-3" key={field.name}>
+                {/* Global banner for status */}
+                {status && (
+                  <div className={`alert alert-${statusType} py-2`}>
+                    {status}
+                  </div>
+                )}
+
+                {/* Validation summary */}
+                {errorMessages.length > 0 && (
+                  <div className="alert alert-danger py-2">
+                    <strong>Please fix the following:</strong>
+                    <ul className="mb-0">
+                      {errorMessages.map((msg, idx) => (
+                        <li key={idx}>{msg}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <form onSubmit={handleSubmit}>
+                  {/* SECTION 1: Participant & Organization */}
+                  <div className="mb-4">
+                    <h5 className="mb-3">Participant &amp; Organization</h5>
+
+                    {/* All non-location fields first */}
+                    {otherFixedFields.map((field) => {
+                      // SECTOR select
+                      if (field.name === "sector") {
+                        const invalid = !!errors.sector;
+                        return (
+                          <div className="mb-3" key={field.name}>
+                            <label className="form-label">
+                              Sector <span className="text-danger">*</span>
+                            </label>
+                            <select
+                              className={`form-select ${
+                                invalid ? "is-invalid" : ""
+                              }`}
+                              value={values.sector || ""}
+                              onChange={(e) =>
+                                handleChange("sector", e.target.value)
+                              }
+                            >
+                              <option value="">Select sector</option>
+                              {SECTOR_OPTIONS.map((opt) => (
+                                <option key={opt} value={opt}>
+                                  {opt}
+                                </option>
+                              ))}
+                            </select>
+                            {invalid && (
+                              <div className="invalid-feedback">
+                                {errors.sector}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      }
+
+                      // default text input for everything else
+                      const invalid = !!errors[field.name];
+                      return (
+                        <div className="mb-3" key={field.name}>
+                          <label className="form-label">
+                            {field.label}{" "}
+                            {field.required && (
+                              <span className="text-danger">*</span>
+                            )}
+                          </label>
+                          <input
+                            type={field.type || "text"}
+                            className={`form-control ${
+                              invalid ? "is-invalid" : ""
+                            }`}
+                            value={values[field.name] || ""}
+                            onChange={(e) =>
+                              handleChange(field.name, e.target.value)
+                            }
+                          />
+                          {invalid && (
+                            <div className="invalid-feedback">
+                              {errors[field.name]}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {/* LOCATION BLOCK – Country → State → City → Address */}
+                    {countryField && (
+                      <div className="mb-3">
                         <label className="form-label">
-                          {field.label}{" "}
-                          {field.required && (
+                          {countryField.label}{" "}
+                          {countryField.required && (
+                            <span className="text-danger">*</span>
+                          )}
+                        </label>
+                        <select
+                          className={`form-select ${
+                            countryFieldName && errors[countryFieldName]
+                              ? "is-invalid"
+                              : ""
+                          }`}
+                          value={countryIso}
+                          onChange={(e) => handleCountrySelect(e.target.value)}
+                        >
+                          <option value="">Select country</option>
+                          {allCountries.map((c) => (
+                            <option key={c.isoCode} value={c.isoCode}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </select>
+                        {countryFieldName && errors[countryFieldName] && (
+                          <div className="invalid-feedback">
+                            {errors[countryFieldName]}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {stateField && (
+                      <div className="mb-3">
+                        <label className="form-label">
+                          {stateField.label}{" "}
+                          {stateField.required && (
+                            <span className="text-danger">*</span>
+                          )}
+                        </label>
+                        <select
+                          className={`form-select ${
+                            stateFieldName && errors[stateFieldName]
+                              ? "is-invalid"
+                              : ""
+                          }`}
+                          value={stateIso}
+                          onChange={(e) => handleStateSelect(e.target.value)}
+                          disabled={!countryIso}
+                        >
+                          <option value="">
+                            {countryIso
+                              ? "Select state / region"
+                              : "Select country first"}
+                          </option>
+                          {availableStates.map((s) => (
+                            <option key={s.isoCode} value={s.isoCode}>
+                              {s.name}
+                            </option>
+                          ))}
+                        </select>
+                        {stateFieldName && errors[stateFieldName] && (
+                          <div className="invalid-feedback">
+                            {errors[stateFieldName]}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {cityField && (
+                      <div className="mb-3">
+                        <label className="form-label">
+                          {cityField.label}{" "}
+                          {cityField.required && (
+                            <span className="text-danger">*</span>
+                          )}
+                        </label>
+                        <select
+                          className={`form-select ${
+                            cityFieldName && errors[cityFieldName]
+                              ? "is-invalid"
+                              : ""
+                          }`}
+                          value={
+                            (cityFieldName && values[cityFieldName]) || ""
+                          }
+                          onChange={(e) => handleCitySelect(e.target.value)}
+                          disabled={!stateIso}
+                        >
+                          <option value="">
+                            {stateIso ? "Select city" : "Select state first"}
+                          </option>
+                          {availableCities.map((c) => (
+                            <option key={c.name} value={c.name}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </select>
+                        {cityFieldName && errors[cityFieldName] && (
+                          <div className="invalid-feedback">
+                            {errors[cityFieldName]}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {addressField && (
+                      <div className="mb-3">
+                        <label className="form-label">
+                          {addressField.label}{" "}
+                          {addressField.required && (
                             <span className="text-danger">*</span>
                           )}
                         </label>
                         <input
-                          type={field.type || "text"}
+                          type={addressField.type || "text"}
                           className={`form-control ${
-                            invalid ? "is-invalid" : ""
+                            addressFieldName && errors[addressFieldName]
+                              ? "is-invalid"
+                              : ""
                           }`}
-                          value={values[field.name] || ""}
+                          value={
+                            (addressFieldName && values[addressFieldName]) || ""
+                          }
                           onChange={(e) =>
-                            handleChange(field.name, e.target.value)
+                            handleChange(addressField.name, e.target.value)
                           }
                         />
-                        {invalid && (
+                        {addressFieldName && errors[addressFieldName] && (
                           <div className="invalid-feedback">
-                            {errors[field.name]}
+                            {errors[addressFieldName]}
                           </div>
                         )}
                       </div>
-                    );
-                  })}
-                </>
-              )}
+                    )}
+                  </div>
 
-              <button type="submit" className="btn btn-primary w-100 mt-3">
-                Submit
-              </button>
-            </form>
+                  {/* SECTION 2: Connections */}
+                  <hr className="my-4" />
+                  <div className="mb-3">
+                    <div className="d-flex justify-content-between align-items-center mb-1">
+                      <h5 className="mb-0">Connections</h5>
+                      <span className="text-muted small">
+                        Optional · up to 5 entries
+                      </span>
+                    </div>
+                    <p className="text-muted small mb-2">
+                      Leave this section empty if you don&apos;t want to add any
+                      connections. If you start a connection row, please fill
+                      both the organization name and connection type.
+                    </p>
+                  </div>
+
+                  {errors.connections && (
+                    <p className="text-danger small mb-2">
+                      {errors.connections}
+                    </p>
+                  )}
+
+                  {connections.length === 0 && (
+                    <p className="text-muted small fst-italic mb-3">
+                      No connections added yet. Click{" "}
+                      <strong>“Add connection”</strong> to add one.
+                    </p>
+                  )}
+
+                  {connections.map((conn, idx) => (
+                    <div
+                      className="border rounded-3 p-3 mb-3 bg-light-subtle"
+                      key={idx}
+                    >
+                      <div className="d-flex justify-content-between align-items-center mb-3">
+                        <h6 className="mb-0">Connection {idx + 1}</h6>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-danger"
+                          onClick={() => removeConnection(idx)}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      <div className="row g-3">
+                        <div className="col-md-6">
+                          <label className="form-label">
+                            Connection Organization
+                          </label>
+                          <input
+                            className="form-control"
+                            value={conn.connectionOrg}
+                            onChange={(e) =>
+                              handleConnectionChange(
+                                idx,
+                                "connectionOrg",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </div>
+                        <div className="col-md-6">
+                          <label className="form-label">Connection Type</label>
+                          <select
+                            className="form-select"
+                            value={conn.connectionType}
+                            onChange={(e) =>
+                              handleConnectionChange(
+                                idx,
+                                "connectionType",
+                                e.target.value
+                              )
+                            }
+                          >
+                            <option value="">Select connection type</option>
+                            {CONNECTION_TYPES.map((opt) => (
+                              <option key={opt} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        {conn.connectionType === "Other" && (
+                          <div className="col-12">
+                            <label className="form-label">
+                              Please describe the connection
+                            </label>
+                            <input
+                              className="form-control"
+                              value={conn.otherText}
+                              onChange={(e) =>
+                                handleConnectionChange(
+                                  idx,
+                                  "otherText",
+                                  e.target.value
+                                )
+                              }
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+
+                  {connections.length < 5 && (
+                    <button
+                      type="button"
+                      className="btn btn-outline-secondary mb-3"
+                      onClick={addConnection}
+                    >
+                      + Add connection
+                    </button>
+                  )}
+
+                  {/* SECTION 3: Extra questions */}
+                  {extraFields.length > 0 && (
+                    <>
+                      <hr className="my-4" />
+                      <h5 className="mb-3">Additional Questions</h5>
+                      {extraFields.map((field) => {
+                        const invalid = !!errors[field.name];
+                        return (
+                          <div className="mb-3" key={field.name}>
+                            <label className="form-label">
+                              {field.label}{" "}
+                              {field.required && (
+                                <span className="text-danger">*</span>
+                              )}
+                            </label>
+                            <input
+                              type={field.type || "text"}
+                              className={`form-control ${
+                                invalid ? "is-invalid" : ""
+                              }`}
+                              value={values[field.name] || ""}
+                              onChange={(e) =>
+                                handleChange(field.name, e.target.value)
+                              }
+                            />
+                            {invalid && (
+                              <div className="invalid-feedback">
+                                {errors[field.name]}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </>
+                  )}
+
+                  <button
+                    type="submit"
+                    className="btn btn-primary w-100 mt-3 py-2"
+                  >
+                    Submit response
+                  </button>
+                </form>
+              </div>
+            </div>
+
+            <p className="text-center text-muted small mt-3">
+              Powered by Tutor/Mentor participation mapping
+            </p>
           </div>
         </div>
       </div>

@@ -1,4 +1,4 @@
-const API_BASE = "https://mapping-analyzing-participation.onrender.com/api" || "http://localhost:5000/api";
+const API_BASE = 'https://mapping-analyzing-participation.onrender.com/api' || "http://localhost:5000/api";
 
 export async function registerAdmin(data) {
   const res = await fetch(`${API_BASE}/auth/register`, {
