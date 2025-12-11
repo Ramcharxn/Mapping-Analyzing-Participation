@@ -388,7 +388,7 @@ def api_export_responses(form_id):
 
 @app.route("/")
 def index():
-    return jsonify({"status": "running", "message": "Form backend is alive. Running v2"})
+    return jsonify({"status": "running", "message": "Form backend is alive. Running v3"})
 
 
 
@@ -425,8 +425,8 @@ def upload():
 
         return jsonify({
             "message": msg,
-            "nodes_url": f"https://mapping-analyzing-participation.onrender.com/{nodes_file}",
-            "edges_url": f"https://mapping-analyzing-participation.onrender.com/{edges_file}",
+            "nodes_url": f"https://mapping-analyzing-participation.onrender.com/download/{nodes_file}",
+            "edges_url": f"https://mapping-analyzing-participation.onrender.com/download/{edges_file}",
         }), 200
 
     except Exception as e:
@@ -449,6 +449,5 @@ def serve(path):
 # -------------------------------------------------------------------
 
 if __name__ == "__main__":
-    # port = int(os.environ.get("PORT", "5000"))
-    # app.run(host="0.0.0.0", port=port, debug=True)
-    app.run()
+    port = int(os.environ.get("PORT", "5000"))
+    app.run(host="0.0.0.0", port=port, debug=True)
