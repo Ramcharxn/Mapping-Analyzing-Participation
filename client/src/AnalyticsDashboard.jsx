@@ -228,7 +228,7 @@ function AnalyticsDashboard() {
   // global sector filter
   const [selectedSector, setSelectedSector] = useState("");
 
-  const NETWORK_API = "http://127.0.0.1:5000";
+  const NETWORK_API = "https://mapping-analyzing-participation.onrender.com";
 
   // network conversion (nodes/edges) state
   const [convertFormat, setConvertFormat] = useState("gephi");
@@ -533,8 +533,8 @@ function AnalyticsDashboard() {
           </div>
 
           <div className="d-none d-md-block">
-            <Link to="/builder" className="btn btn-light analytics-hero-cta">
-              {"<"} Back to Forms
+            <Link to="/split" className="btn btn-light analytics-hero-cta">
+              {"<"} Create Node and Edges
             </Link>
           </div>
         </div>
