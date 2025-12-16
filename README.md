@@ -2,7 +2,7 @@
 
 A full-stack web application for collecting, analyzing, and visualizing participant connections from events. Transform survey responses into interactive network graphs and analytics dashboards.
 
-![Network Visualization](public/assets/hero-preview.png)
+<img width="1839" height="901" alt="image" src="https://github.com/user-attachments/assets/4dc4d2ce-d9fe-416c-8880-e7a2716f0fe9" />
 
 ## 🌟 Features
 
